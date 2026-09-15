@@ -1,0 +1,56 @@
+name: Reproduce cache collision
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reproduce:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Populate the Gradle build cache
+        shell: bash
+        run: ./gradlew nxProjectGraph -Phash=local -PworkspaceRoot="$PWD" --build-cache --console=plain
+      - name: Restore both reports from the Gradle build cache
+        shell: bash
+        run: |
+          rm -rf a/api/build/nx b/api/build/nx
+          ./gradlew nxProjectGraph -Phash=local -PworkspaceRoot="$PWD" --build-cache --console=plain | tee restore.log
+          grep -F '> Task :a:api:nxProjectReport FROM-CACHE' restore.log
+          grep -F '> Task :b:api:nxProjectReport FROM-CACHE' restore.log
+      - name: Assert the cache collision
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+
+          const reportA = fs.readFileSync('a/api/build/nx/api.json', 'utf8');
+          const reportB = fs.readFileSync('b/api/build/nx/api.json', 'utf8');
+          const reportBNodePaths = Object.keys(JSON.parse(reportB).nodes)
+            .map((path) => path.replaceAll('\\', '/'));
+
+          if (reportA !== reportB) {
+            throw new Error('Expected identical reports restored from the build cache.');
+          }
+
+          if (!reportBNodePaths.some((path) => path.endsWith('/a/api'))) {
+            throw new Error('Expected b/api report to contain the a/api project node.');
+          }
+
+          console.log('Confirmed nxProjectReport cache-key collision.');
+          NODE
