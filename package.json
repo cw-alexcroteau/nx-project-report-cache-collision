@@ -1,0 +1,7 @@
+{
+  "name": "nx-project-report-cache-collision",
+  "private": true,
+  "devDependencies": {
+    "nx": "22.2.0"
+  }
+}
